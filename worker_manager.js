@@ -80,13 +80,19 @@ const LOGGER = {
 // Create Swarm Service
 async function createService(cmd, fullMsg) {
   try {
+    let params = {
+      userId: fullMsg.userId,
+      id: fullMsg[cmd].id,
+      profileNum: fullMsg[cmd].profileNum,
+      password: fullMsg[cmd].isyPassword
+    }
     let service = await DOCKER.createService({
       Name: `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`,
       TaskTemplate: {
         ContainerSpec: {
           Image: "nodeserver:latest",
           Env: [
-            "URL=https://blahblah.com"
+            `PGURL=https://pxu4jgaiue.execute-api.us-east-1.amazonaws.com/test/api/sys/nsgetioturl?params=${bota(JSON.stringify(params))}`
           ]
         },
         Resources: {
