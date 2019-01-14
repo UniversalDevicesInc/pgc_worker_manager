@@ -4,6 +4,13 @@ const STAGE = process.env.STAGE || 'test'
 const LOCAL = process.env.LOCAL || false
 const DYNAMO_NS = `pg_${STAGE}-nsTable`
 const SQS_WORKER = `pg_${STAGE}-workers`
+const SECRETS = require('secrets')
+const AWS_ACCESS_KEY_ID = SECRETS.get('AWS_ACCESS_KEY_ID')
+const AWS_SECRET_ACCESS_KEY = SECRETS.get('AWS_SECRET_ACCESS_KEY')
+if (AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
+  process.env['AWS_ACCESS_KEY_ID'] = AWS_ACCESS_KEY_ID
+  process.env['AWS_SECRET_ACCESS_KEY'] = AWS_SECRET_ACCESS_KEY
+}
 
 const fs = require('fs')
 const Docker = require('dockerode')
