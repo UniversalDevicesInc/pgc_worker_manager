@@ -80,19 +80,19 @@ const LOGGER = {
 // Create Swarm Service
 async function createService(cmd, fullMsg) {
   try {
-    let params = {
+    let params = urlEncode(btoa(JSON.stringify({
       userId: fullMsg.userId,
       id: fullMsg[cmd].id,
       profileNum: fullMsg[cmd].profileNum,
       password: fullMsg[cmd].isyPassword
-    }
+    })))
     let service = await DOCKER.createService({
       Name: `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`,
       TaskTemplate: {
         ContainerSpec: {
           Image: "nodeserver:latest",
           Env: [
-            `PGURL=https://pxu4jgaiue.execute-api.us-east-1.amazonaws.com/test/api/sys/nsgetioturl?params=${bota(JSON.stringify(params))}`
+            `PGURL=https://pxu4jgaiue.execute-api.us-east-1.amazonaws.com/test/api/sys/nsgetioturl?params=${params}`
           ]
         },
         Resources: {
@@ -130,6 +130,7 @@ async function createService(cmd, fullMsg) {
     return service
   } catch (err) {
     LOGGER.error(`createService: ${err.stack}`, fullMsg.userId)
+    return false
   }
 }
 
@@ -334,10 +335,10 @@ async function resultAddNodeServer(cmd, fullMsg) {
     if (worker) {
       let update = await createNS(cmd, fullMsg, worker)
       if (update) {
-        LOGGER.info(`Provisioning successful for ${fullMsg[cmd].name}. Starting NodeServer.`)
+        LOGGER.info(`Provisioning successful for ${fullMsg[cmd].name}. Starting NodeServer.`, fullMsg.userId)
       }
     } else {
-      LOGGER.error(`Failed to provision worker service. Removing NodeServer from ISY.`)
+      LOGGER.error(`Failed to provision worker service. Removing NodeServer from ISY.`, fullMsg.userId)
       await removeNodeServer('removeNodeServer', {
         userId: fullMsg.userId,
         removeNodeServer: {
@@ -532,6 +533,15 @@ function randomAlphaOnlyString (length) {
 
 const timeout = ms => new Promise(run => setTimeout(run, ms))
 
+const btoa = function(str) { return Buffer.from(str, 'utf8').toString('base64') }
+const atob = function(b64Encoded) { return Buffer.from(b64Encoded, 'base64').toString('utf8') }
+const urlEncode = function(str) { return str.replace(/\+/g, '-').replace(/\//g, '_').replace(/\=+$/, '') }
+const urlDecode = function(str) {
+  str = (str + '===').slice(0, str.length + (str.length % 4))
+  return str.replace(/-/g, '+').replace(/_/g, '/')
+}
+
+// Message Functions
 async function processMessage(message) {
   let props = verifyProps(message, ['userId', 'topic'])
   if (!props.valid) {
