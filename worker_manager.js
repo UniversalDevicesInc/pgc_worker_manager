@@ -95,11 +95,11 @@ async function createService(cmd, fullMsg) {
             NanoCPUs: 250000000
           }
         },
-				RestartPolicy: {
-					"Condition": "on-failure",
-					"Delay": 60000000000,
-					"MaxAttempts": 0
-				},
+        RestartPolicy: {
+          "Condition": "on-failure",
+          "Delay": 60000000000,
+          "MaxAttempts": 0
+        },
         LogDriver: {
           Name: "awslogs",
           Options: {
