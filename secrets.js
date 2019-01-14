@@ -6,7 +6,7 @@ module.exports = {
   get (secret) {
     try {
       // Swarm secret are accessible within tmpfs /run/secrets dir
-      return fs.readFileSync(util.format("/run/secrets/%s", secret), "utf8").trim()
+      return fs.readFileSync(`/run/secrets/${secret}`)
      }
      catch (e) {
        return false

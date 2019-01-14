@@ -616,13 +616,18 @@ async function getParameters(nextToken) {
     NextToken: nextToken,
     WithDecryption: true
   }
-  let params = await SSM.getParametersByPath(ssmParams).promise()
-  if (params.Parameters.length === 0) throw new Error(`Parameters not retrieved. Exiting.`)
-  for (let param of params.Parameters) {
-    PARAMS[param.Name.split('/').slice(-1)[0]] = param.Value
-  }
-  if (params.hasOwnProperty('NextToken')) {
-    await getParameters(params.NextToken)
+  try {
+    let params = await SSM.getParametersByPath(ssmParams).promise()
+    if (params.Parameters.length === 0) throw new Error(`Parameters not retrieved. Exiting.`)
+    for (let param of params.Parameters) {
+      PARAMS[param.Name.split('/').slice(-1)[0]] = param.Value
+    }
+    if (params.hasOwnProperty('NextToken')) {
+      await getParameters(params.NextToken)
+    }
+  } catch (err) {
+    LOGGER.error(`getParameters: ${err.stack}`)
+    process.exit(1)
   }
 }
 
