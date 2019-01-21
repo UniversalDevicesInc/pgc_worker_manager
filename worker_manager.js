@@ -190,35 +190,6 @@ async function deleteDbNodeServer(cmd, fullMsg) {
   }
 }
 
-// Update Worker on NodeServer
-async function updateNS(cmd, fullMsg) {
-  let data = fullMsg[cmd]
-  let params = {
-    TableName: DYNAMO_NS,
-    Key: {
-      "id": data.isy.id,
-      "profileNum": `${data.profileNum}`
-    },
-    UpdateExpression: `
-      SET timeStarted = :timeStarted,
-      connected = :connected`,
-    ExpressionAttributeValues: {
-      ":timeStarted": 0,
-      ":connected": false
-    },
-    ReturnValues: 'ALL_NEW'
-  }
-  try {
-    let data = await DYNAMO.update(params).promise()
-    if (data.hasOwnProperty('Attributes')) {
-      let update = data.Attributes
-      LOGGER.debug(`updateNS: Updated NodeServer (${update.profileNum})${update.name} JSON: ${JSON.stringify(update)}`, fullMsg.userId)
-      return update
-    }
-  } catch (err) {
-    LOGGER.error(`updateNS: ${err.stack}`, fullMsg.userId)
-  }
-}
 
 async function updateClientNodeServers(id, fullMsg) {
   await mqttSend(`${STAGE}/isy`, {
@@ -354,9 +325,9 @@ async function resultAddNodeServer(cmd, fullMsg) {
       LOGGER.error(`Failed to add NodeServer to ISY. Removing from DB. ${fullMsg.result.error}`, fullMsg.userId)
       let nodeServer = await deleteDbNodeServer(cmd, fullMsg)
       if (nodeServer.worker) {
-        await mqttSend(`${STAGE}/workers/${nodeServer.worker}`, {
+        await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, {
           id: nodeServer.worker,
-          removeNodeServer: {}
+          delete: {}
         }, fullMsg)
       }
     } catch (err) {
@@ -379,9 +350,9 @@ async function resultRemoveNodeServer(cmd, fullMsg) {
     let nodeServer = await deleteDbNodeServer(cmd, fullMsg)
     if (nodeServer) {
       if (nodeServer.worker) {
-        await mqttSend(`${STAGE}/workers/${nodeServer.worker}`, {
+        await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, {
           id: nodeServer.worker,
-          removeNodeServer: {}
+          delete: {}
         }, fullMsg)
         LOGGER.info(`Sent stop to ${nodeServer.name} worker: ${nodeServer.worker}`, fullMsg.userId)
         await timeout(2000)
@@ -411,7 +382,6 @@ async function startNodeServer(cmd, fullMsg) {
           serviceUpdate['version'] = `${serviceInfo.Version.Index}`,
           serviceUpdate.Mode.Replicated.Replicas = 1
           await service.update(serviceUpdate)
-          await updateNS(cmd, fullMsg)
           LOGGER.info(`${cmd} sent successfully. Starting ${nodeServer.name}`, fullMsg.userId)
         }
       }
@@ -437,9 +407,8 @@ async function stopNodeServer(cmd, fullMsg) {
         serviceUpdate['id'] = serviceInfo.id,
         serviceUpdate['version'] = `${serviceInfo.Version.Index}`,
         serviceUpdate.Mode.Replicated.Replicas = 0
-        let update = await updateNS(cmd, fullMsg)
-        let payload = {[cmd]: update}
-        await mqttSend(`${STAGE}/workers/${nodeServer.worker}`, payload)
+        let payload = {stop: update}
+        await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, payload)
         LOGGER.info(`${cmd} sent successfully. Delaying 2 seconds before shutdown for NodeServer self cleanup.`), fullMsg.userId
         await timeout(2000)
         await service.update(serviceUpdate)
