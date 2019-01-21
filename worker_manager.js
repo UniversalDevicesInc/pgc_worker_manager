@@ -407,7 +407,7 @@ async function stopNodeServer(cmd, fullMsg) {
         serviceUpdate['id'] = serviceInfo.id,
         serviceUpdate['version'] = `${serviceInfo.Version.Index}`,
         serviceUpdate.Mode.Replicated.Replicas = 0
-        let payload = {stop: update}
+        let payload = {stop: ''}
         await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, payload)
         LOGGER.info(`${cmd} sent successfully. Delaying 2 seconds before shutdown for NodeServer self cleanup.`), fullMsg.userId
         await timeout(2000)
