@@ -7,6 +7,7 @@ const SQS_WORKER = `pg_${STAGE}-workers`
 const SECRETS = require('./secrets')
 const AWS_ACCESS_KEY_ID = SECRETS.get('SWARM_AWS_ACCESS_KEY_ID')
 const AWS_SECRET_ACCESS_KEY = SECRETS.get('SWARM_AWS_SECRET_ACCESS_KEY')
+const PGURL = SECRETS.get('SWARM_PGURL')
 if (AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
   process.env['AWS_ACCESS_KEY_ID'] = AWS_ACCESS_KEY_ID
   process.env['AWS_SECRET_ACCESS_KEY'] = AWS_SECRET_ACCESS_KEY
@@ -77,6 +78,7 @@ const LOGGER = {
     }
   }
 }
+
 // Create Swarm Service
 async function createService(cmd, fullMsg) {
   try {
@@ -92,7 +94,7 @@ async function createService(cmd, fullMsg) {
         ContainerSpec: {
           Image: "nodeserver:latest",
           Env: [
-            `PGURL=https://pxu4jgaiue.execute-api.us-east-1.amazonaws.com/test/api/sys/nsgetioturl?params=${params}`
+            `PGURL=${PARAMS.NS_DATA_URL}${params}`
           ]
         },
         Resources: {
@@ -232,7 +234,8 @@ async function createNS(cmd, fullMsg, worker) {
       customData = :customData,
       notices = :notices,
       logBucket = :logBucket,
-      oauth = :oauth
+      oauth = :oauth,
+      firstRun = :firstRun
       `,
     ExpressionAttributeNames: {
       "#name": 'name',
@@ -264,7 +267,8 @@ async function createNS(cmd, fullMsg, worker) {
       ":customParams": {},
       ":customData": {},
       ":notices": {},
-      ":logBucket": PARAMS.LOG_BUCKET
+      ":logBucket": PARAMS.LOG_BUCKET,
+      ":firstRun": true
     },
     ReturnValues: 'ALL_NEW'
   }
