@@ -88,13 +88,14 @@ async function createService(cmd, fullMsg) {
       profileNum: fullMsg[cmd].profileNum,
       password: fullMsg[cmd].isyPassword
     })))
+    let PGURL=`${PARAMS.NS_DATA_URL}${params}`
     let service = await DOCKER.createService({
       Name: `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`,
       TaskTemplate: {
         ContainerSpec: {
           Image: "nodeserver:latest",
           Env: [
-            `PGURL=${PARAMS.NS_DATA_URL}${params}`
+            `PGURL=${PGURL}`
           ]
         },
         Resources: {
@@ -129,7 +130,7 @@ async function createService(cmd, fullMsg) {
         Ports: [{ TargetPort: 3000 }]
       }
     })
-    return service
+    return {service: service, pgurl: PGURL}
   } catch (err) {
     LOGGER.error(`createService: ${err.stack}`, fullMsg.userId)
     return false
@@ -236,7 +237,7 @@ async function createNS(cmd, fullMsg, worker) {
       logBucket = :logBucket,
       oauth = :oauth,
       firstRun = :firstRun
-      `,
+      pgUrl = :pgUrl`,
     ExpressionAttributeNames: {
       "#name": 'name',
       "#type": 'type',
@@ -253,7 +254,7 @@ async function createNS(cmd, fullMsg, worker) {
       ":isyUsername": data.isyUsername,
       ":isyPassword": data.isyPassword,
       ":isConnected": false,
-      ":worker": worker.id,
+      ":worker": worker.service.id,
       ":netInfo": {},
       ":url": data.url,
       ":lang": data.language,
@@ -268,7 +269,8 @@ async function createNS(cmd, fullMsg, worker) {
       ":customData": {},
       ":notices": {},
       ":logBucket": PARAMS.LOG_BUCKET,
-      ":firstRun": true
+      ":firstRun": true,
+      ":pgUrl": worker.pgurl
     },
     ReturnValues: 'ALL_NEW'
   }
