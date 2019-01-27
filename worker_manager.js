@@ -130,7 +130,7 @@ async function createService(cmd, fullMsg) {
         Ports: [{ TargetPort: 3000 }]
       }
     })
-    return {service: service, pgurl: PGURL}
+    return {service: service, pgUrl: PGURL}
   } catch (err) {
     LOGGER.error(`createService: ${err.stack}`, fullMsg.userId)
     return false
@@ -236,7 +236,7 @@ async function createNS(cmd, fullMsg, worker) {
       notices = :notices,
       logBucket = :logBucket,
       oauth = :oauth,
-      firstRun = :firstRun
+      firstRun = :firstRun,
       pgUrl = :pgUrl`,
     ExpressionAttributeNames: {
       "#name": 'name',
@@ -270,7 +270,7 @@ async function createNS(cmd, fullMsg, worker) {
       ":notices": {},
       ":logBucket": PARAMS.LOG_BUCKET,
       ":firstRun": true,
-      ":pgUrl": worker.pgurl
+      ":pgUrl": worker.pgUrl
     },
     ReturnValues: 'ALL_NEW'
   }
