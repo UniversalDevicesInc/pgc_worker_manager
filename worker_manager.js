@@ -275,7 +275,7 @@ async function createNS(cmd, fullMsg, worker) {
     ReturnValues: 'ALL_NEW'
   }
   try {
-    let workerInfo = await worker.inspect()
+    let workerInfo = await worker.service.inspect()
     params.ExpressionAttributeValues[":netInfo"] = {
       publicIp: DOCKER_HOST,
       publicPort: workerInfo.Endpoint.Ports[0].PublishedPort
