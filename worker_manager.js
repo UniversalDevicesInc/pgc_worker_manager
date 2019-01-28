@@ -95,8 +95,9 @@ async function createService(cmd, fullMsg) {
     data.language.toLowerCase().includes('python') ? image += 'python' : image += 'node'
     if (image === `pgc_nodeserver:`) { LOGGER.error(`createService: Bad Image: ${image}`, fullMsg.userId) }
     let PGURL=`${PARAMS.NS_DATA_URL}${params}`
+    let name = `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`
     let service = await DOCKER.createService({
-      Name: `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`,
+      Name: name,
       TaskTemplate: {
         ContainerSpec: {
           Image: image,
@@ -120,7 +121,7 @@ async function createService(cmd, fullMsg) {
           Options: {
             "awslogs-region": "us-east-1",
             "awslogs-group": `/pgc/${STAGE}/nodeservers`,
-            tag: "{{.Name}}"
+            tag: name
           }
         },
       },
