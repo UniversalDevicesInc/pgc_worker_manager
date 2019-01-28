@@ -242,7 +242,8 @@ async function createNS(cmd, fullMsg, worker) {
       logBucket = :logBucket,
       oauth = :oauth,
       firstRun = :firstRun,
-      pgUrl = :pgUrl`,
+      pgUrl = :pgUrl,
+      development = :devMode`,
     ExpressionAttributeNames: {
       "#name": 'name',
       "#type": 'type',
@@ -275,7 +276,8 @@ async function createNS(cmd, fullMsg, worker) {
       ":notices": {},
       ":logBucket": PARAMS.LOG_BUCKET,
       ":firstRun": true,
-      ":pgUrl": worker.pgUrl
+      ":pgUrl": worker.pgUrl,
+      ":devMode": data.development || false
     },
     ReturnValues: 'ALL_NEW'
   }
