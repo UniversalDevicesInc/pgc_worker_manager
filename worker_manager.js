@@ -89,6 +89,7 @@ async function createService(cmd, fullMsg) {
       profileNum: fullMsg[cmd].profileNum,
       password: fullMsg[cmd].isyPassword
     })))
+    let devMode = data.development || false
     let image = `pgc_nodeserver:`
     if (STAGE === 'test') { image += `beta_`}
     data.language.toLowerCase().includes('python') ? image += 'python' : image += 'node'
@@ -98,7 +99,7 @@ async function createService(cmd, fullMsg) {
       Name: `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`,
       TaskTemplate: {
         ContainerSpec: {
-          Image: "nodeserver:latest",
+          Image: image,
           Env: [
             `PGURL=${PGURL}`
           ]
@@ -119,13 +120,13 @@ async function createService(cmd, fullMsg) {
           Options: {
             "awslogs-region": "us-east-1",
             "awslogs-group": `/pgc/${STAGE}/nodeservers`,
-            tag: "{{.Name}}-{{.ID}}"
+            tag: "{{.Name}}"
           }
         },
       },
       Mode: {
         Replicated: {
-          Replicas: 1
+          Replicas: devMode ? 0 : 1
         }
       },
       Networks: [{
