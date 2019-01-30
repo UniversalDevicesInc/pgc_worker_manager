@@ -98,7 +98,7 @@ async function createService(cmd, fullMsg) {
     }
     if (STAGE === 'test') { image += `beta_`}
     data.language.toLowerCase().includes('python') ? image += 'python' : image += 'node'
-    if (image === `pgc_nodeserver:`) { LOGGER.error(`createService: Bad Image: ${image}`, fullMsg.userId) }
+    if (image === `einstein42/pgc_nodeserver:`) { LOGGER.error(`createService: Bad Image: ${image}`, fullMsg.userId) }
     let PGURL=`${PARAMS.NS_DATA_URL}${params}`
     let name = `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`
     let service = await DOCKER.createService({
