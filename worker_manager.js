@@ -90,7 +90,12 @@ async function createService(cmd, fullMsg) {
       password: fullMsg[cmd].isyPassword
     })))
     let devMode = data.development || false
-    let image = `pgc_nodeserver:`
+    let image
+    if (PARAMS.hasOwnProperty('NS_IMAGE_PREFIX')) {
+      image = PARAMS.NS_IMAGE_PREFIX
+    } else {
+      image = `einstein42/pgc_nodeserver:`
+    }
     if (STAGE === 'test') { image += `beta_`}
     data.language.toLowerCase().includes('python') ? image += 'python' : image += 'node'
     if (image === `pgc_nodeserver:`) { LOGGER.error(`createService: Bad Image: ${image}`, fullMsg.userId) }
