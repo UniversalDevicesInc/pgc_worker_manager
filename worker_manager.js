@@ -117,9 +117,10 @@ async function createService(cmd, fullMsg) {
           }
         },
         RestartPolicy: {
-          "Condition": "on-failure",
-          "Delay": 60000000000,
-          "MaxAttempts": 0
+          "Condition": "none"
+          // "Delay": 300000000000,
+          // "MaxAttempts": 1,
+          // "Window": 300000000000,
         },
         LogDriver: {
           Name: "awslogs",
