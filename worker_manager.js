@@ -637,6 +637,18 @@ async function getParameters(nextToken) {
   }
 }
 
+async function startHealthCheck() {
+  require('http').createServer(function(request, response) {
+    if (request.url === '/health' && request.method ==='GET') {
+        //AWS ELB pings this URL to make sure the instance is running smoothly
+        let data = json.dumps({uptime: process.uptime()})
+        response.writeHead(200, {'Content-Type': 'application/json'})
+        response.write(data)
+        response.end()
+    }
+  }).listen(3000)
+}
+
 async function main() {
   await getParameters()
   if (!PARAMS.SQS_WORKERS) {
@@ -645,6 +657,7 @@ async function main() {
   }
   LOGGER.info(`Retrieved Parameters from AWS Parameter Store for Stage: ${STAGE}`)
   await configAWS()
+  startHealthCheck()
   try {
     while (true) {
       await getMessages()

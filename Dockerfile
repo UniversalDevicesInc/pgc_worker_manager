@@ -5,7 +5,7 @@ VOLUME /usr/bin/docker
 ARG STAGE=test
 ENV STAGE $STAGE
 
-RUN mkdir -p /app/
+RUN mkdir -p /app/certs/
 # COPY certs/ /app/certs
 
 WORKDIR /app
