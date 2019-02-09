@@ -641,7 +641,7 @@ async function startHealthCheck() {
   require('http').createServer(function(request, response) {
     if (request.url === '/health' && request.method ==='GET') {
         //AWS ELB pings this URL to make sure the instance is running smoothly
-        let data = json.dumps({uptime: process.uptime()})
+        let data = JSON.stringify({uptime: process.uptime()})
         response.writeHead(200, {'Content-Type': 'application/json'})
         response.write(data)
         response.end()
