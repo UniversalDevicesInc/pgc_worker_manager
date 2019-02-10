@@ -1,6 +1,6 @@
 'use strict'
 
-const VERSION = '1.0.0'
+const VERSION = '1.0.1'
 
 const STAGE = process.env.STAGE || 'test'
 const LOCAL = process.env.LOCAL || false
@@ -257,7 +257,8 @@ async function createNS(cmd, fullMsg, worker) {
       oauth = :oauth,
       firstRun = :firstRun,
       pgUrl = :pgUrl,
-      development = :devMode`,
+      development = :devMode,
+      lastRan = :lastRan`,
     ExpressionAttributeNames: {
       "#name": 'name',
       "#type": 'type',
@@ -291,7 +292,8 @@ async function createNS(cmd, fullMsg, worker) {
       ":logBucket": PARAMS.LOG_BUCKET,
       ":firstRun": true,
       ":pgUrl": worker.pgUrl,
-      ":devMode": data.development || false
+      ":devMode": data.development || false,
+      ":lastRan": 0
     },
     ReturnValues: 'ALL_NEW'
   }
