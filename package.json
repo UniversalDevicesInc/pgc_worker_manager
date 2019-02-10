@@ -1,15 +1,17 @@
 {
   "name": "pgc_worker_manager",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Polyglot v2 Swarm Worker Manager",
   "main": "worker_manager.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "scripts": {},
+  "author": "James Milne (milne.james@gmail.com)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/UniversalDevicesInc/pgc_worker_manager.git"
   },
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "aws-sdk": "2.387.0",
+    "aws-sdk": "^2.387.0",
     "dockerode": "2.5.8"
   }
 }

@@ -1,9 +1,11 @@
 'use strict'
 
+const PACKAGE = require('./package.json')
+const VERSION = PACKAGE.version
+
 const STAGE = process.env.STAGE || 'test'
 const LOCAL = process.env.LOCAL || false
 const DYNAMO_NS = `pg_${STAGE}-nsTable`
-const SQS_WORKER = `pg_${STAGE}-workers`
 const SECRETS = require('./secrets')
 const AWS_ACCESS_KEY_ID = SECRETS.get('SWARM_AWS_ACCESS_KEY_ID')
 const AWS_SECRET_ACCESS_KEY = SECRETS.get('SWARM_AWS_SECRET_ACCESS_KEY')
@@ -17,37 +19,40 @@ const Docker = require('dockerode')
 const AWS = require('aws-sdk')
 AWS.config.update({region:'us-east-1', correctClockSkew: true})
 const SQS = new AWS.SQS()
-const SSM = new AWS.SSM()
 const DYNAMO = new AWS.DynamoDB.DocumentClient()
 
 let PARAMS = {}
-
-const DOCKER_HOST = process.env.DOCKER_HOST || '18.207.110.225'
-const DOCKER_PORT = process.env.DOCKER_PORT || 2376
-let DOCKER_CA, DOCKER_CERT, DOCKER_KEY, IOT
-try {
-  DOCKER_CA = fs.readFileSync(LOCAL ? `certs/${STAGE}/ca.pem` : `/run/secrets/ca.pem`)
-  DOCKER_CERT = fs.readFileSync(LOCAL ? `certs/${STAGE}/cert.pem` : `/run/secrets/cert.pem`)
-  DOCKER_KEY = fs.readFileSync(LOCAL ? `certs/${STAGE}/key.pem` : `/run/secrets/key.pem`)
-} catch (err) {
-  console.error(`Error loading docker certs for API. Exiting...`)
-  process.kill(process.pid, 'SIGTERM')
+let DOCKER, IOT
+if (LOCAL) {
+  const DOCKER_HOST = process.env.DOCKER_HOST || '18.207.110.225'
+  const DOCKER_PORT = process.env.DOCKER_PORT || 2376
+  let DOCKER_CA, DOCKER_CERT, DOCKER_KEY
+  try {
+    DOCKER_CA = fs.readFileSync(LOCAL ? `certs/${STAGE}/ca.pem` : `/run/secrets/ca.pem`)
+    DOCKER_CERT = fs.readFileSync(LOCAL ? `certs/${STAGE}/cert.pem` : `/run/secrets/cert.pem`)
+    DOCKER_KEY = fs.readFileSync(LOCAL ? `certs/${STAGE}/key.pem` : `/run/secrets/key.pem`)
+  } catch (err) {
+    console.error(`Error loading docker certs for API. Exiting... ${err.stack}`)
+    process.kill(process.pid, 'SIGINT')
+  }
+  DOCKER = new Docker({
+    host: DOCKER_HOST,
+    port: DOCKER_PORT,
+    ca: DOCKER_CA,
+    cert: DOCKER_CERT,
+    key: DOCKER_KEY
+  })
+} else {
+  DOCKER = new Docker({socketPath: '/app/docker.sock'})
 }
 
-console.log(`Worker Manager: Running in Stage: ${STAGE}`)
+console.log(`Worker Manager Version: ${VERSION} :: Stage: ${STAGE}`)
 console.log(`ENV: ${JSON.stringify(process.env)}`)
 
 async function configAWS() {
   IOT = new AWS.IotData({endpoint: `${PARAMS.IOT_ENDPOINT_HOST}`})
 }
 
-const DOCKER = new Docker({
-  host: DOCKER_HOST,
-  port: DOCKER_PORT,
-  ca: DOCKER_CA,
-  cert: DOCKER_CERT,
-  key: DOCKER_KEY
-})
 
 // Logger intercept for easy logging in the future.
 const LOGGER = {
@@ -77,8 +82,10 @@ const LOGGER = {
     }
   }
 }
+
 // Create Swarm Service
 async function createService(cmd, fullMsg) {
+  let data = fullMsg[cmd]
   try {
     let params = urlEncode(btoa(JSON.stringify({
       userId: fullMsg.userId,
@@ -86,13 +93,25 @@ async function createService(cmd, fullMsg) {
       profileNum: fullMsg[cmd].profileNum,
       password: fullMsg[cmd].isyPassword
     })))
+    let devMode = data.development || false
+    let image
+    if (PARAMS.hasOwnProperty('NS_IMAGE_PREFIX')) {
+      image = PARAMS.NS_IMAGE_PREFIX
+    } else {
+      image = `einstein42/pgc_nodeserver:`
+    }
+    if (STAGE === 'test') { image += `beta_`}
+    data.language.toLowerCase().includes('python') ? image += 'python' : image += 'node'
+    if (image === `einstein42/pgc_nodeserver:`) { LOGGER.error(`createService: Bad Image: ${image}`, fullMsg.userId) }
+    let PGURL=`${PARAMS.NS_DATA_URL}${params}`
+    let name = `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`
     let service = await DOCKER.createService({
-      Name: `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`,
+      Name: name,
       TaskTemplate: {
         ContainerSpec: {
-          Image: "nodeserver:latest",
+          Image: image,
           Env: [
-            `PGURL=https://pxu4jgaiue.execute-api.us-east-1.amazonaws.com/test/api/sys/nsgetioturl?params=${params}`
+            `PGURL=${PGURL}`
           ]
         },
         Resources: {
@@ -102,22 +121,23 @@ async function createService(cmd, fullMsg) {
           }
         },
         RestartPolicy: {
-          "Condition": "on-failure",
-          "Delay": 60000000000,
-          "MaxAttempts": 0
+          "Condition": "none"
+          // "Delay": 300000000000,
+          // "MaxAttempts": 1,
+          // "Window": 300000000000,
         },
         LogDriver: {
           Name: "awslogs",
           Options: {
             "awslogs-region": "us-east-1",
             "awslogs-group": `/pgc/${STAGE}/nodeservers`,
-            tag: "{{.Name}}-{{.ID}}"
+            tag: name
           }
         },
       },
       Mode: {
         Replicated: {
-          Replicas: 1
+          Replicas: devMode ? 0 : 1
         }
       },
       Networks: [{
@@ -127,7 +147,7 @@ async function createService(cmd, fullMsg) {
         Ports: [{ TargetPort: 3000 }]
       }
     })
-    return service
+    return {service: service, pgUrl: PGURL}
   } catch (err) {
     LOGGER.error(`createService: ${err.stack}`, fullMsg.userId)
     return false
@@ -190,35 +210,6 @@ async function deleteDbNodeServer(cmd, fullMsg) {
   }
 }
 
-// Update Worker on NodeServer
-async function updateNS(cmd, fullMsg) {
-  let data = fullMsg[cmd]
-  let params = {
-    TableName: DYNAMO_NS,
-    Key: {
-      "id": data.isy.id,
-      "profileNum": `${data.profileNum}`
-    },
-    UpdateExpression: `
-      SET timeStarted = :timeStarted,
-      connected = :connected`,
-    ExpressionAttributeValues: {
-      ":timeStarted": 0,
-      ":connected": false
-    },
-    ReturnValues: 'ALL_NEW'
-  }
-  try {
-    let data = await DYNAMO.update(params).promise()
-    if (data.hasOwnProperty('Attributes')) {
-      let update = data.Attributes
-      LOGGER.debug(`updateNS: Updated NodeServer (${update.profileNum})${update.name} JSON: ${JSON.stringify(update)}`, fullMsg.userId)
-      return update
-    }
-  } catch (err) {
-    LOGGER.error(`updateNS: ${err.stack}`, fullMsg.userId)
-  }
-}
 
 async function updateClientNodeServers(id, fullMsg) {
   await mqttSend(`${STAGE}/isy`, {
@@ -261,8 +252,11 @@ async function createNS(cmd, fullMsg, worker) {
       customData = :customData,
       notices = :notices,
       logBucket = :logBucket,
-      oauth = :oauth
-      `,
+      oauth = :oauth,
+      firstRun = :firstRun,
+      pgUrl = :pgUrl,
+      development = :devMode,
+      lastRan = :lastRan`,
     ExpressionAttributeNames: {
       "#name": 'name',
       "#type": 'type',
@@ -279,7 +273,7 @@ async function createNS(cmd, fullMsg, worker) {
       ":isyUsername": data.isyUsername,
       ":isyPassword": data.isyPassword,
       ":isConnected": false,
-      ":worker": worker.id,
+      ":worker": worker.service.id,
       ":netInfo": {},
       ":url": data.url,
       ":lang": data.language,
@@ -293,12 +287,16 @@ async function createNS(cmd, fullMsg, worker) {
       ":customParams": {},
       ":customData": {},
       ":notices": {},
-      ":logBucket": PARAMS.LOG_BUCKET
+      ":logBucket": PARAMS.LOG_BUCKET,
+      ":firstRun": true,
+      ":pgUrl": worker.pgUrl,
+      ":devMode": data.development || false,
+      ":lastRan": 0
     },
     ReturnValues: 'ALL_NEW'
   }
   try {
-    let workerInfo = await worker.inspect()
+    let workerInfo = await worker.service.inspect()
     params.ExpressionAttributeValues[":netInfo"] = {
       publicIp: DOCKER_HOST,
       publicPort: workerInfo.Endpoint.Ports[0].PublishedPort
@@ -354,9 +352,9 @@ async function resultAddNodeServer(cmd, fullMsg) {
       LOGGER.error(`Failed to add NodeServer to ISY. Removing from DB. ${fullMsg.result.error}`, fullMsg.userId)
       let nodeServer = await deleteDbNodeServer(cmd, fullMsg)
       if (nodeServer.worker) {
-        await mqttSend(`${STAGE}/workers/${nodeServer.worker}`, {
+        await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, {
           id: nodeServer.worker,
-          removeNodeServer: {}
+          delete: {}
         }, fullMsg)
       }
     } catch (err) {
@@ -379,9 +377,9 @@ async function resultRemoveNodeServer(cmd, fullMsg) {
     let nodeServer = await deleteDbNodeServer(cmd, fullMsg)
     if (nodeServer) {
       if (nodeServer.worker) {
-        await mqttSend(`${STAGE}/workers/${nodeServer.worker}`, {
+        await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, {
           id: nodeServer.worker,
-          removeNodeServer: {}
+          delete: {}
         }, fullMsg)
         LOGGER.info(`Sent stop to ${nodeServer.name} worker: ${nodeServer.worker}`, fullMsg.userId)
         await timeout(2000)
@@ -411,7 +409,6 @@ async function startNodeServer(cmd, fullMsg) {
           serviceUpdate['version'] = `${serviceInfo.Version.Index}`,
           serviceUpdate.Mode.Replicated.Replicas = 1
           await service.update(serviceUpdate)
-          await updateNS(cmd, fullMsg)
           LOGGER.info(`${cmd} sent successfully. Starting ${nodeServer.name}`, fullMsg.userId)
         }
       }
@@ -437,9 +434,8 @@ async function stopNodeServer(cmd, fullMsg) {
         serviceUpdate['id'] = serviceInfo.id,
         serviceUpdate['version'] = `${serviceInfo.Version.Index}`,
         serviceUpdate.Mode.Replicated.Replicas = 0
-        let update = await updateNS(cmd, fullMsg)
-        let payload = {[cmd]: update}
-        await mqttSend(`${STAGE}/workers/${nodeServer.worker}`, payload)
+        let payload = {stop: ''}
+        await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, payload)
         LOGGER.info(`${cmd} sent successfully. Delaying 2 seconds before shutdown for NodeServer self cleanup.`), fullMsg.userId
         await timeout(2000)
         await service.update(serviceUpdate)
@@ -625,6 +621,7 @@ async function getMessages() {
 }
 
 async function getParameters(nextToken) {
+  const ssm = new AWS.SSM()
   var ssmParams = {
     Path: `/pgc/${STAGE}/`,
     MaxResults: 10,
@@ -633,7 +630,7 @@ async function getParameters(nextToken) {
     WithDecryption: true
   }
   try {
-    let params = await SSM.getParametersByPath(ssmParams).promise()
+    let params = await ssm.getParametersByPath(ssmParams).promise()
     if (params.Parameters.length === 0) throw new Error(`Parameters not retrieved. Exiting.`)
     for (let param of params.Parameters) {
       PARAMS[param.Name.split('/').slice(-1)[0]] = param.Value
@@ -647,6 +644,18 @@ async function getParameters(nextToken) {
   }
 }
 
+async function startHealthCheck() {
+  require('http').createServer(function(request, response) {
+    if (request.url === '/health' && request.method ==='GET') {
+        //AWS ELB pings this URL to make sure the instance is running smoothly
+        let data = JSON.stringify({uptime: process.uptime()})
+        response.writeHead(200, {'Content-Type': 'application/json'})
+        response.write(data)
+        response.end()
+    }
+  }).listen(3000)
+}
+
 async function main() {
   await getParameters()
   if (!PARAMS.SQS_WORKERS) {
@@ -655,6 +664,7 @@ async function main() {
   }
   LOGGER.info(`Retrieved Parameters from AWS Parameter Store for Stage: ${STAGE}`)
   await configAWS()
+  startHealthCheck()
   try {
     while (true) {
       await getMessages()
