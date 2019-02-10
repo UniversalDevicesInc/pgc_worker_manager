@@ -43,7 +43,7 @@ if (LOCAL) {
     key: DOCKER_KEY
   })
 } else {
-  DOCKER = new Docker({socketPath: '/var/run/docker.sock'})
+  DOCKER = new Docker({socketPath: '/app/docker.sock'})
 }
 
 console.log(`Worker Manager: Running in Stage: ${STAGE}`)
