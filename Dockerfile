@@ -6,6 +6,7 @@ ARG STAGE=test
 ENV STAGE $STAGE
 
 RUN mkdir -p /app/certs/
+RUN mkdir -p /var/run/
 # COPY certs/ /app/certs
 
 WORKDIR /app
