@@ -141,7 +141,7 @@ async function createService(cmd, fullMsg) {
         }
       },
       Networks: [{
-        Target: "pgc"
+        Target: "pgc-prod"
       }],
       EndpointSpec: {
         Ports: [{ TargetPort: 3000 }]
@@ -256,7 +256,7 @@ async function createNS(cmd, fullMsg, worker) {
       firstRun = :firstRun,
       pgUrl = :pgUrl,
       development = :devMode,
-      lastRan = :lastRan`,
+      lastDisconnect = :lastDisconnect`,
     ExpressionAttributeNames: {
       "#name": 'name',
       "#type": 'type',
@@ -291,7 +291,7 @@ async function createNS(cmd, fullMsg, worker) {
       ":firstRun": true,
       ":pgUrl": worker.pgUrl,
       ":devMode": data.development || false,
-      ":lastRan": 0
+      ":lastDisconnect": 0
     },
     ReturnValues: 'ALL_NEW'
   }
