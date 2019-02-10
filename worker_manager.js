@@ -1,15 +1,14 @@
 'use strict'
 
-const VERSION = '1.0.1'
+const PACKAGE = require('./package.json')
+const VERSION = PACKAGE.version
 
 const STAGE = process.env.STAGE || 'test'
 const LOCAL = process.env.LOCAL || false
 const DYNAMO_NS = `pg_${STAGE}-nsTable`
-const SQS_WORKER = `pg_${STAGE}-workers`
 const SECRETS = require('./secrets')
 const AWS_ACCESS_KEY_ID = SECRETS.get('SWARM_AWS_ACCESS_KEY_ID')
 const AWS_SECRET_ACCESS_KEY = SECRETS.get('SWARM_AWS_SECRET_ACCESS_KEY')
-const PGURL = SECRETS.get('SWARM_PGURL')
 if (AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
   process.env['AWS_ACCESS_KEY_ID'] = AWS_ACCESS_KEY_ID
   process.env['AWS_SECRET_ACCESS_KEY'] = AWS_SECRET_ACCESS_KEY
@@ -34,8 +33,8 @@ if (LOCAL) {
     DOCKER_CERT = fs.readFileSync(LOCAL ? `certs/${STAGE}/cert.pem` : `/run/secrets/cert.pem`)
     DOCKER_KEY = fs.readFileSync(LOCAL ? `certs/${STAGE}/key.pem` : `/run/secrets/key.pem`)
   } catch (err) {
-    console.error(`Error loading docker certs for API. Exiting...`)
-    process.kill(process.pid, 'SIGTERM')
+    console.error(`Error loading docker certs for API. Exiting... ${err.stack}`)
+    process.kill(process.pid, 'SIGINT')
   }
   DOCKER = new Docker({
     host: DOCKER_HOST,

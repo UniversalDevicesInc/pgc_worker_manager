@@ -1,4 +1,4 @@
-FROM node:10.9-alpine
+FROM node:11-alpine
 VOLUME /var/run/docker.sock
 VOLUME /usr/bin/docker
 
@@ -7,7 +7,7 @@ ENV STAGE $STAGE
 
 RUN mkdir -p /app/certs/
 RUN mkdir -p /var/run/
-# COPY certs/ /app/certs
+COPY certs/ /app/certs
 
 WORKDIR /app
 COPY package.json worker_manager.js secrets.js /app/
