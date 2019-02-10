@@ -22,17 +22,28 @@ const SSM = new AWS.SSM()
 const DYNAMO = new AWS.DynamoDB.DocumentClient()
 
 let PARAMS = {}
-
-const DOCKER_HOST = process.env.DOCKER_HOST || '18.207.110.225'
-const DOCKER_PORT = process.env.DOCKER_PORT || 2376
-let DOCKER_CA, DOCKER_CERT, DOCKER_KEY, IOT
-try {
-  DOCKER_CA = fs.readFileSync(LOCAL ? `certs/${STAGE}/ca.pem` : `/run/secrets/ca.pem`)
-  DOCKER_CERT = fs.readFileSync(LOCAL ? `certs/${STAGE}/cert.pem` : `/run/secrets/cert.pem`)
-  DOCKER_KEY = fs.readFileSync(LOCAL ? `certs/${STAGE}/key.pem` : `/run/secrets/key.pem`)
-} catch (err) {
-  console.error(`Error loading docker certs for API. Exiting...`)
-  process.kill(process.pid, 'SIGTERM')
+let DOCKER, IOT
+if (LOCAL) {
+  const DOCKER_HOST = process.env.DOCKER_HOST || '18.207.110.225'
+  const DOCKER_PORT = process.env.DOCKER_PORT || 2376
+  let DOCKER_CA, DOCKER_CERT, DOCKER_KEY
+  try {
+    DOCKER_CA = fs.readFileSync(LOCAL ? `certs/${STAGE}/ca.pem` : `/run/secrets/ca.pem`)
+    DOCKER_CERT = fs.readFileSync(LOCAL ? `certs/${STAGE}/cert.pem` : `/run/secrets/cert.pem`)
+    DOCKER_KEY = fs.readFileSync(LOCAL ? `certs/${STAGE}/key.pem` : `/run/secrets/key.pem`)
+  } catch (err) {
+    console.error(`Error loading docker certs for API. Exiting...`)
+    process.kill(process.pid, 'SIGTERM')
+  }
+  DOCKER = new Docker({
+    host: DOCKER_HOST,
+    port: DOCKER_PORT,
+    ca: DOCKER_CA,
+    cert: DOCKER_CERT,
+    key: DOCKER_KEY
+  })
+} else {
+  DOCKER = new Docker({socketPath: '/var/run/docker.sock'})
 }
 
 console.log(`Worker Manager: Running in Stage: ${STAGE}`)
@@ -42,13 +53,6 @@ async function configAWS() {
   IOT = new AWS.IotData({endpoint: `${PARAMS.IOT_ENDPOINT_HOST}`})
 }
 
-const DOCKER = new Docker({
-  host: DOCKER_HOST,
-  port: DOCKER_PORT,
-  ca: DOCKER_CA,
-  cert: DOCKER_CERT,
-  key: DOCKER_KEY
-})
 
 // Logger intercept for easy logging in the future.
 const LOGGER = {
