@@ -19,7 +19,6 @@ const Docker = require('dockerode')
 const AWS = require('aws-sdk')
 AWS.config.update({region:'us-east-1', correctClockSkew: true})
 const SQS = new AWS.SQS()
-const SSM = new AWS.SSM()
 const DYNAMO = new AWS.DynamoDB.DocumentClient()
 
 let PARAMS = {}
@@ -622,6 +621,7 @@ async function getMessages() {
 }
 
 async function getParameters(nextToken) {
+  const ssm = new AWS.SSM()
   var ssmParams = {
     Path: `/pgc/${STAGE}/`,
     MaxResults: 10,
@@ -630,7 +630,7 @@ async function getParameters(nextToken) {
     WithDecryption: true
   }
   try {
-    let params = await SSM.getParametersByPath(ssmParams).promise()
+    let params = await ssm.getParametersByPath(ssmParams).promise()
     if (params.Parameters.length === 0) throw new Error(`Parameters not retrieved. Exiting.`)
     for (let param of params.Parameters) {
       PARAMS[param.Name.split('/').slice(-1)[0]] = param.Value
