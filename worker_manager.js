@@ -1,5 +1,7 @@
 'use strict'
 
+const VERSION = '1.0.0'
+
 const STAGE = process.env.STAGE || 'test'
 const LOCAL = process.env.LOCAL || false
 const DYNAMO_NS = `pg_${STAGE}-nsTable`
@@ -46,7 +48,7 @@ if (LOCAL) {
   DOCKER = new Docker({socketPath: '/app/docker.sock'})
 }
 
-console.log(`Worker Manager: Running in Stage: ${STAGE}`)
+console.log(`Worker Manager Version: ${VERSION} :: Stage: ${STAGE}`)
 console.log(`ENV: ${JSON.stringify(process.env)}`)
 
 async function configAWS() {
