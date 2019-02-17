@@ -105,7 +105,7 @@ async function createService(cmd, fullMsg) {
     if (image === `einstein42/pgc_nodeserver:`) { LOGGER.error(`createService: Bad Image: ${image}`, fullMsg.userId) }
     let PGURL=`${PARAMS.NS_DATA_URL}${params}`
     let name = `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`
-    let service = await DOCKER.createService({
+    let createService = {
       Name: name,
       TaskTemplate: {
         ContainerSpec: {
@@ -143,10 +143,12 @@ async function createService(cmd, fullMsg) {
       Networks: [{
         Target: "pgc-prod"
       }],
-      EndpointSpec: {
-        Ports: [{ TargetPort: 3000 }]
-      }
-    })
+      EndpointSpec: {}
+    }
+    if (data.ingressRequired) {
+      createService.EndpointSpec['Ports'] = [{ TargetPort: 3000 }]
+    }
+    let service = await DOCKER.createService(createService)
     return {service: service, pgUrl: PGURL}
   } catch (err) {
     LOGGER.error(`createService: ${err.stack}`, fullMsg.userId)
