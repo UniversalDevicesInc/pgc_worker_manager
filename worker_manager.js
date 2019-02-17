@@ -276,7 +276,7 @@ async function createNS(cmd, fullMsg, worker) {
       ":isyPassword": data.isyPassword,
       ":isConnected": false,
       ":worker": worker.service.id,
-      ":netInfo": {publicIp: '', publicPort: 0},
+      ":netInfo": {publicIp: PARAMS.NS_PUBLIC_IP, publicPort: 0},
       ":url": data.url,
       ":lang": data.language,
       ":version": data.version,
@@ -301,10 +301,7 @@ async function createNS(cmd, fullMsg, worker) {
     let workerInfo = await worker.service.inspect()
     LOGGER.debug(`createNS: workerInfo: ${JSON.stringify(workerInfo)}`)
     if (workerInfo.hasOwnProperty('Endpoint') && workerInfo.Endpoint.hasOwnProperty('Ports') && Array.isArray(workerInfo.Endpoint.Ports)) {
-      params.ExpressionAttributeValues[":netInfo"] = {
-        publicIp: PARAMS.NS_PUBLIC_IP,
-        publicPort: workerInfo.Endpoint.Ports[0].PublishedPort
-      }
+      params.ExpressionAttributeValues[":netInfo"].publicPort = workerInfo.Endpoint.Ports[0].PublishedPort
     }
     let response = await DYNAMO.update(params).promise()
     if (response.hasOwnProperty('Attributes')) {
