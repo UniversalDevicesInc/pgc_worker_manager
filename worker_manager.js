@@ -276,7 +276,7 @@ async function createNS(cmd, fullMsg, worker) {
       ":isyPassword": data.isyPassword,
       ":isConnected": false,
       ":worker": worker.service.id,
-      ":netInfo": {},
+      ":netInfo": {publicIp: '', publicPort: 0},
       ":url": data.url,
       ":lang": data.language,
       ":version": data.version,
