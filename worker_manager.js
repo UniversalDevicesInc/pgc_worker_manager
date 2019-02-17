@@ -297,9 +297,12 @@ async function createNS(cmd, fullMsg, worker) {
   }
   try {
     let workerInfo = await worker.service.inspect()
-    params.ExpressionAttributeValues[":netInfo"] = {
-      publicIp: PARAMS.NS_PUBLIC_IP,
-      publicPort: workerInfo.Endpoint.Ports[0].PublishedPort
+    LOGGER.debug(`createNS: workerInfo: ${JSON.stringify(workerInfo)}`)
+    if (workerInfo.hasOwnProperty('Endpoint') && workerInfo.Endpoint.hasOwnProperty('Ports') && Array.isArray(workerInfo.Endpoint.Ports)) {
+      params.ExpressionAttributeValues[":netInfo"] = {
+        publicIp: PARAMS.NS_PUBLIC_IP,
+        publicPort: workerInfo.Endpoint.Ports[0].PublishedPort
+      }
     }
     let response = await DYNAMO.update(params).promise()
     if (response.hasOwnProperty('Attributes')) {
