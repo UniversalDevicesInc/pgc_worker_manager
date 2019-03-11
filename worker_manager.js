@@ -116,7 +116,7 @@ async function createService(cmd, fullMsg) {
         },
         Resources: {
           Limits: {
-            MemoryBytes: 67108864, // 64MB, 128MB = 134217728
+            MemoryBytes: data.language.toLowerCase().includes('python') ? 67108864 : 134217728, // python 64MB = 67108864, node 128MB = 134217728
             NanoCPUs: 250000000
           }
         },
