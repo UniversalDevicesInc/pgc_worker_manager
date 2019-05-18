@@ -147,6 +147,7 @@ async function createService(cmd, fullMsg) {
     }
     if (data.ingressRequired) {
       createService.EndpointSpec['Ports'] = [{ TargetPort: 3000 }]
+      LOGGER.debug(`createService: ingressRequired set`, fullMsg.userId)
     }
     let service = await DOCKER.createService(createService)
     return {service: service, pgUrl: PGURL}
