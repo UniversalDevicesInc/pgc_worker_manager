@@ -12,6 +12,6 @@
   },
   "dependencies": {
     "aws-sdk": "^2.387.0",
-    "dockerode": "2.5.8"
+    "kubernetes-client": "8.1.2"
   }
 }

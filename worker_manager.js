@@ -4,47 +4,21 @@ const PACKAGE = require('./package.json')
 const VERSION = PACKAGE.version
 
 const STAGE = process.env.STAGE || 'test'
-const LOCAL = process.env.LOCAL || false
 const DYNAMO_NS = `pg_${STAGE}-nsTable`
-const SECRETS = require('./secrets')
-const AWS_ACCESS_KEY_ID = SECRETS.get('SWARM_AWS_ACCESS_KEY_ID')
-const AWS_SECRET_ACCESS_KEY = SECRETS.get('SWARM_AWS_SECRET_ACCESS_KEY')
-if (AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
-  process.env['AWS_ACCESS_KEY_ID'] = AWS_ACCESS_KEY_ID
-  process.env['AWS_SECRET_ACCESS_KEY'] = AWS_SECRET_ACCESS_KEY
-}
 
-const fs = require('fs')
-const Docker = require('dockerode')
+// Configure Kubernetes-Client with inCluster service account credentials
+const Client = require('kubernetes-client').Client
+const Request = require('kubernetes-client/backends/request')
+const Backend = new Request(Request.config.getInCluster()) //fromKubeconfig() if local
+const KUBERNETES = new Client({ Backend })
+
 const AWS = require('aws-sdk')
 AWS.config.update({region:'us-east-1', correctClockSkew: true})
 const SQS = new AWS.SQS()
 const DYNAMO = new AWS.DynamoDB.DocumentClient()
 
 let PARAMS = {}
-let DOCKER, IOT
-if (LOCAL) {
-  const DOCKER_HOST = process.env.DOCKER_HOST || '18.207.110.225'
-  const DOCKER_PORT = process.env.DOCKER_PORT || 2376
-  let DOCKER_CA, DOCKER_CERT, DOCKER_KEY
-  try {
-    DOCKER_CA = fs.readFileSync(LOCAL ? `certs/${STAGE}/ca.pem` : `/run/secrets/ca.pem`)
-    DOCKER_CERT = fs.readFileSync(LOCAL ? `certs/${STAGE}/cert.pem` : `/run/secrets/cert.pem`)
-    DOCKER_KEY = fs.readFileSync(LOCAL ? `certs/${STAGE}/key.pem` : `/run/secrets/key.pem`)
-  } catch (err) {
-    console.error(`Error loading docker certs for API. Exiting... ${err.stack}`)
-    process.kill(process.pid, 'SIGINT')
-  }
-  DOCKER = new Docker({
-    host: DOCKER_HOST,
-    port: DOCKER_PORT,
-    ca: DOCKER_CA,
-    cert: DOCKER_CERT,
-    key: DOCKER_KEY
-  })
-} else {
-  DOCKER = new Docker({socketPath: '/app/docker.sock'})
-}
+let IOT
 
 console.log(`Worker Manager Version: ${VERSION} :: Stage: ${STAGE}`)
 console.log(`ENV: ${JSON.stringify(process.env)}`)
@@ -52,7 +26,6 @@ console.log(`ENV: ${JSON.stringify(process.env)}`)
 async function configAWS() {
   IOT = new AWS.IotData({endpoint: `${PARAMS.IOT_ENDPOINT_HOST}`})
 }
-
 
 // Logger intercept for easy logging in the future.
 const LOGGER = {
@@ -102,65 +75,118 @@ async function createService(cmd, fullMsg) {
     }
     if (STAGE === 'test') { image += `beta_`}
     data.language.toLowerCase().includes('python') ? image += 'python' : image += 'node'
-    if (image === `einstein42/pgc_nodeserver:`) { LOGGER.error(`createService: Bad Image: ${image}`, fullMsg.userId) }
+    if (image === `einstein42/pgc_nodeserver:`) {
+      LOGGER.error(`createService: Bad Image: ${image}`, fullMsg.userId)
+      return false
+    }
     let PGURL=`${PARAMS.NS_DATA_URL}${params}`
-    let name = `${fullMsg[cmd].name}_${fullMsg.userId}_${fullMsg[cmd].id.replace(/:/g, '')}_${fullMsg[cmd].profileNum}`
-    let createService = {
-      Name: name,
-      TaskTemplate: {
-        ContainerSpec: {
-          Image: image,
-          Env: [
-            `PGURL=${PGURL}`
-          ]
-        },
-        Resources: {
-          Limits: {
-            MemoryBytes: data.language.toLowerCase().includes('python') ? 67108864 : 268435456, // python 64MB = 67108864, node 128MB = 134217728 256MB = 268435456
-            NanoCPUs: 250000000
-          }
-        },
-        RestartPolicy: {
-          "Condition": "none"
-          // "Delay": 300000000000,
-          // "MaxAttempts": 1,
-          // "Window": 300000000000,
-        },
-        LogDriver: {
-          Name: "awslogs",
-          Options: {
-            "awslogs-region": "us-east-1",
-            "awslogs-group": `/pgc/${STAGE}/nodeservers`,
-            tag: name
-          }
-        },
-      },
-      Mode: {
-        Replicated: {
-          Replicas: devMode ? 0 : 1
+    let name = `${fullMsg[cmd].name}-${fullMsg[cmd].id.replace(/:/g, '')}-${fullMsg[cmd].profileNum}`
+    const deploymentManifest = {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: {
+        name: name,
+        namespace: 'nodeservers',
+        labels: {
+          user: `${fullMsg.userId}`,
+          isy: `${fullMsg[cmd].id.replace(/:/g, '')}`,
+          profileNum: `${fullMsg[cmd].profileNum}`
         }
       },
-      Networks: [{
-        Target: "pgc-prod"
-      }],
-      EndpointSpec: {}
+      spec: {
+        replicas: devMode ? 0 : 1,
+        selector: {
+          matchLabels: {
+            nodeserver: name
+          }
+        },
+        template: {
+          metadata: {
+            labels: {
+              nodeserver: name,
+              user: `${fullMsg.userId}`,
+              isy: `${fullMsg[cmd].id.replace(/:/g, '')}`,
+              profileNum: `${fullMsg[cmd].profileNum}`
+            }
+          },
+          spec: {
+            containers: [
+              {
+                name: name,
+                env: [
+                  {
+                    name: 'PGURL',
+                    value: PGURL
+                  }
+                ],
+                image: image,
+                imagePullPolicy: 'Always'
+              }
+            ],
+            terminationGracePeriodSeconds: 10
+          }
+        }
+      }
     }
+    const deployment = await KUBERNETES.apis.apps.v1.namespaces('nodeservers').deployments.post({ body: deploymentManifest })
+    if (deployment.statusCode != 201) {
+      LOGGER.error(`createService: Failed to create deployment. ${JSON.stringify(deployment)}`, fullMsg.userId)
+      return false
+    }
+    let nodePort = 0
     if (data.ingressRequired) {
-      createService.EndpointSpec['Ports'] = [{ TargetPort: 3000 }]
-      LOGGER.debug(`createService: ingressRequired set`, fullMsg.userId)
+      LOGGER.debug(`createService: ingressRequired set creating Service`, fullMsg.userId)
+      const serviceManifest = {
+        kind: 'Service',
+        apiVersion: 'v1',
+        metadata: {
+            name: name,
+            namespace: 'nodeservers',
+            labels: {
+              user: `${fullMsg.userId}`,
+              isy: `${fullMsg[cmd].id.replace(/:/g, '')}`,
+              profileNum: `${fullMsg[cmd].profileNum}`
+            }
+        },
+        spec: {
+            type: 'NodePort',
+            selector: {
+                nodeserver: name
+            },
+            ports: [
+                {
+                    port: 3000,
+                    name: 'ingress'
+                }
+            ]
+        }
+      }
+      const nodeport = await KUBERNETES.api.v1.namespaces('nodeservers').services.post({ body: serviceManifest })
+      if (nodeport.statusCode != 201) {
+        LOGGER.error(`createService: Failed to create NodePort Service: ${JSON.stringify(nodeport)}`, fullMsg.userId)
+      } else {
+        nodePort = nodeport.body.spec.ports[0].nodePort
+        LOGGER.debug(`createService: NodePort Service created: ${nodePort}`)
+      }
     }
-    let service = await DOCKER.createService(createService)
-    return {service: service, pgUrl: PGURL}
+    return {deployment: deployment.body, nodePort: nodePort, pgUrl: PGURL, }
   } catch (err) {
     LOGGER.error(`createService: ${err.stack}`, fullMsg.userId)
     return false
   }
 }
 
+async function removeDeployment(cmd, fullMsg, worker) {
+  try {
+    return await KUBERNETES.apis.apps.v1.namespaces('nodeservers').deployments(worker).delete()
+  } catch (err) {
+    LOGGER.error(`removeDeployment: ${err.stack}`, fullMsg.userId)
+  }
+}
+
 async function removeService(cmd, fullMsg, worker) {
   try {
-    let service = await DOCKER.getService(worker)
-    return await service.remove()
+    return await KUBERNETES.api.v1.namespaces('nodeservers').services(worker).delete()
   } catch (err) {
     LOGGER.error(`removeService: ${err.stack}`, fullMsg.userId)
   }
@@ -276,8 +302,8 @@ async function createNS(cmd, fullMsg, worker) {
       ":isyUsername": data.isyUsername,
       ":isyPassword": data.isyPassword,
       ":isConnected": false,
-      ":worker": worker.service.id,
-      ":netInfo": {publicIp: PARAMS.NS_PUBLIC_IP, publicPort: 0},
+      ":worker": worker.deployment.metadata.name,
+      ":netInfo": {publicIp: PARAMS.NS_PUBLIC_IP, publicPort: worker.nodePort},
       ":url": data.url,
       ":lang": data.language,
       ":version": data.version,
@@ -299,11 +325,6 @@ async function createNS(cmd, fullMsg, worker) {
     ReturnValues: 'ALL_NEW'
   }
   try {
-    let workerInfo = await worker.service.inspect()
-    LOGGER.debug(`createNS: workerInfo: ${JSON.stringify(workerInfo)}`)
-    if (workerInfo.hasOwnProperty('Endpoint') && workerInfo.Endpoint.hasOwnProperty('Ports') && Array.isArray(workerInfo.Endpoint.Ports)) {
-      params.ExpressionAttributeValues[":netInfo"].publicPort = workerInfo.Endpoint.Ports[0].PublishedPort
-    }
     let response = await DYNAMO.update(params).promise()
     if (response.hasOwnProperty('Attributes')) {
       let update = response.Attributes
@@ -384,11 +405,14 @@ async function resultRemoveNodeServer(cmd, fullMsg) {
           id: nodeServer.worker,
           delete: {}
         }, fullMsg)
-        LOGGER.info(`Sent stop to ${nodeServer.name} worker: ${nodeServer.worker}`, fullMsg.userId)
+        LOGGER.info(`resultRemoveNodeServer: Sent stop to ${nodeServer.name} worker: ${nodeServer.worker}`, fullMsg.userId)
         await timeout(2000)
-        await removeService(cmd, fullMsg, nodeServer.worker)
+        await removeDeployment(cmd, fullMsg, nodeServer.worker)
+        if (nodeServer.netInfo.publicPort !== 0) {
+          await removeService(cmd, fullMsg, nodeServer.worker)
+        }
       }
-      LOGGER.info(`Removed ${nodeServer.name}(${nodeServer.worker}) successfully.`, fullMsg.userId)
+      LOGGER.info(`resultRemoveNodeServer: Removed ${nodeServer.name}(${nodeServer.worker}) successfully.`, fullMsg.userId)
       await updateClientNodeServers(fullMsg[cmd].id, fullMsg)
     }
   }
@@ -399,22 +423,19 @@ async function startNodeServer(cmd, fullMsg) {
   try {
     let nodeServer = data.ns
     if (nodeServer && nodeServer.type && nodeServer.type === 'cloud') {
-      if (nodeServer.isConnected) {
-        LOGGER.error(`${nodeServer.name} is already connected. Not sending start command.`, fullMsg.userId)
-      } else {
-        let service = await DOCKER.getService(nodeServer.worker)
-        let serviceInfo = await service.inspect()
-        if (serviceInfo.Spec.Mode.Replicated.Replicas === 1) {
-          LOGGER.error(`${nodeServer.name} is already started. Not sending start command.`, fullMsg.userId)
-        } else {
-          let serviceUpdate = serviceInfo.Spec
-          serviceUpdate['id'] = serviceInfo.id,
-          serviceUpdate['version'] = `${serviceInfo.Version.Index}`,
-          serviceUpdate.Mode.Replicated.Replicas = 1
-          await service.update(serviceUpdate)
-          LOGGER.info(`${cmd} sent successfully. Starting ${nodeServer.name}`, fullMsg.userId)
-        }
+      if (!nodeServer.isConnected) {
+        return LOGGER.error(`${nodeServer.name} is already connected. Not sending start command.`, fullMsg.userId)
       }
+      const getDeployment = await KUBERNETES.apis.apps.v1beta1.namespaces('nodeservers').deployments(nodeServer.worker).get()
+      if (getDeployment.statusCode !== 200) {
+        return LOGGER.error(`${nodeServer.name} couldn't get status of deployment.`, fullMsg.userId)
+      }
+      if (getDeployment.body.spec.replicas === 1) {
+        return LOGGER.error(`${nodeServer.name} is already started. Not sending start command.`, fullMsg.userId)
+      }
+      let updateManifest = { spec: { replicas: 1 }}
+      await KUBERNETES.apis.apps.v1.namespaces('nodeservers').deployments(nodeServer.worker).patch({ body: updateManifest })
+      LOGGER.info(`${cmd} sent successfully. Starting ${nodeServer.name}`, fullMsg.userId)
     } else {
       LOGGER.error(`${nodeServer.name} not found or not a Cloud NodeServer`, fullMsg.userId)
     }
@@ -428,22 +449,20 @@ async function stopNodeServer(cmd, fullMsg) {
   try {
     let nodeServer = data.ns
     if (nodeServer && nodeServer.type && nodeServer.type === 'cloud') {
-      let service = await DOCKER.getService(nodeServer.worker)
-      let serviceInfo = await service.inspect()
-      if (serviceInfo.Spec.Mode.Replicated.Replicas === 0) {
-        LOGGER.error(`${nodeServer.name} is already stopped. Not sending stop command.`, fullMsg.userId)
-      } else {
-        let serviceUpdate = serviceInfo.Spec
-        serviceUpdate['id'] = serviceInfo.id,
-        serviceUpdate['version'] = `${serviceInfo.Version.Index}`,
-        serviceUpdate.Mode.Replicated.Replicas = 0
-        let payload = {stop: ''}
-        await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, payload)
-        LOGGER.info(`${cmd} sent successfully. Delaying 2 seconds before shutdown for NodeServer self cleanup.`), fullMsg.userId
-        await timeout(2000)
-        await service.update(serviceUpdate)
-        LOGGER.info(`${cmd} sent successfully. Stopping ${nodeServer.name}`, fullMsg.userId)
+      const getDeployment = await KUBERNETES.apis.apps.v1beta1.namespaces('nodeservers').deployments(nodeServer.worker).get()
+      if (getDeployment.statusCode !== 200) {
+        return LOGGER.error(`${nodeServer.name} couldn't get status of deployment.`, fullMsg.userId)
       }
+      if (getDeployment.body.spec.replicas === 0) {
+        return LOGGER.error(`${nodeServer.name} is already stopped. Not sending stop command.`, fullMsg.userId)
+      }
+      let payload = {stop: ''}
+      await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, payload)
+      LOGGER.info(`${cmd} sent successfully. Delaying 2 seconds before shutdown for NodeServer self cleanup.`), fullMsg.userId
+      await timeout(2000)
+      let updateManifest = { spec: { replicas: 0 }}
+      await KUBERNETES.apis.apps.v1.namespaces('nodeservers').deployments(nodeServer.worker).patch({ body: updateManifest })
+      LOGGER.info(`${cmd} sent successfully. Stopping ${nodeServer.name}`, fullMsg.userId)
     } else {
       LOGGER.error(`${nodeServer.name} not found or not a Cloud NodeServer`, fullMsg.userId)
     }
@@ -668,6 +687,7 @@ async function main() {
   LOGGER.info(`Retrieved Parameters from AWS Parameter Store for Stage: ${STAGE}`)
   await configAWS()
   startHealthCheck()
+  await KUBERNETES.loadSpec()
   try {
     while (true) {
       await getMessages()
