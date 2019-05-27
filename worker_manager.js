@@ -5,7 +5,7 @@ const VERSION = PACKAGE.version
 
 const STAGE = process.env.STAGE || 'test'
 const DYNAMO_NS = `pg_${STAGE}-nsTable`
-
+console.log(`ABC123 ${VERSION}`)
 // Configure Kubernetes-Client with inCluster service account credentials
 const Client = require('kubernetes-client').Client
 const Request = require('kubernetes-client/backends/request')
