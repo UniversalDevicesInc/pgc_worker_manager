@@ -1,9 +1,14 @@
 {
   "name": "pgc_worker_manager",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Polyglot v2 Swarm Worker Manager",
   "main": "worker_manager.js",
-  "scripts": {},
+  "scripts": {
+    "dockerbuild": "docker build --rm -t einstein42/$npm_package_name:version-$npm_package_version .",
+    "dockerpush": "docker login && docker push einstein42/$npm_package_name:version-$npm_package_version",
+    "patchandrelease": "npm version patch --force",
+    "postversion": "git push && git push --tags"
+  },
   "author": "James Milne (milne.james@gmail.com)",
   "license": "MIT",
   "repository": {

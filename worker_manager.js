@@ -5,12 +5,10 @@ const VERSION = PACKAGE.version
 
 const STAGE = process.env.STAGE || 'test'
 const DYNAMO_NS = `pg_${STAGE}-nsTable`
-console.log(`ABC123 ${VERSION}`)
 // Configure Kubernetes-Client with inCluster service account credentials
 const Client = require('kubernetes-client').Client
 const Request = require('kubernetes-client/backends/request')
-const Backend = new Request(Request.config.getInCluster()) //fromKubeconfig() if local
-const KUBERNETES = new Client({ Backend })
+let KUBERNETES
 
 const AWS = require('aws-sdk')
 AWS.config.update({region:'us-east-1', correctClockSkew: true})
@@ -80,7 +78,7 @@ async function createService(cmd, fullMsg) {
       return false
     }
     let PGURL=`${PARAMS.NS_DATA_URL}${params}`
-    let name = `${fullMsg[cmd].name}-${fullMsg[cmd].id.replace(/:/g, '')}-${fullMsg[cmd].profileNum}`
+    let name = `${fullMsg[cmd].name.toLowerCase()}-${fullMsg[cmd].id.replace(/:/g, '')}-${fullMsg[cmd].profileNum}`
     const deploymentManifest = {
       apiVersion: 'apps/v1',
       kind: 'Deployment',
@@ -423,7 +421,7 @@ async function startNodeServer(cmd, fullMsg) {
   try {
     let nodeServer = data.ns
     if (nodeServer && nodeServer.type && nodeServer.type === 'cloud') {
-      if (!nodeServer.isConnected) {
+      if (nodeServer.isConnected) {
         return LOGGER.error(`${nodeServer.name} is already connected. Not sending start command.`, fullMsg.userId)
       }
       const getDeployment = await KUBERNETES.apis.apps.v1beta1.namespaces('nodeservers').deployments(nodeServer.worker).get()
@@ -687,6 +685,8 @@ async function main() {
   LOGGER.info(`Retrieved Parameters from AWS Parameter Store for Stage: ${STAGE}`)
   await configAWS()
   startHealthCheck()
+  const backend = new Request(Request.config.getInCluster()) //getInCluster()
+  KUBERNETES = new Client({ backend })
   await KUBERNETES.loadSpec()
   try {
     while (true) {
