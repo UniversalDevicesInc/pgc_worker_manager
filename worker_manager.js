@@ -132,7 +132,8 @@ async function createService(cmd, fullMsg) {
       return false
     }
     let nodePort = 0
-    if (data.ingressRequired) {
+    let httpsIngress = false
+    if (data.ingressRequired || data.tcpIngress) {
       LOGGER.debug(`createService: ingressRequired set creating Service`, fullMsg.userId)
       const serviceManifest = {
         kind: 'Service',
@@ -167,7 +168,28 @@ async function createService(cmd, fullMsg) {
         LOGGER.debug(`createService: NodePort Service created: ${nodePort}`)
       }
     }
-    return {deployment: deployment.body, nodePort: nodePort, pgUrl: PGURL, }
+    if (data.httpsIngress) {
+      const headers = {'content-type': 'application/json-patch+json'}
+      const patchManifest = [{
+        op: 'add',
+        path: '/spec/rules/0/http/paths/-',
+        value: {
+          backend: {
+            serviceName: name,
+            servicePort: 3000
+          },
+          path: `/ns/${name}`
+        }
+      }]
+      const patchIngress = await KUBERNETES.apis.extensions.v1beta1.namespaces('nodeservers').ingresses('ns-ingress').patch({ headers: headers, body: patchManifest})
+      if (patchIngress.statusCode != 200) {
+        LOGGER.error(`createService: Failed to create Ingress: ${JSON.stringify(patchIngress)}`, fullMsg.userId)
+      } else {
+        httpsIngress = true
+        LOGGER.debug(`createService: HTTPS Ingress created: ${name}`)
+      }
+    }
+    return {deployment: deployment.body, nodePort: nodePort, pgUrl: PGURL, httpsIngress}
   } catch (err) {
     LOGGER.error(`createService: ${err.stack}`, fullMsg.userId)
     return false
@@ -187,6 +209,29 @@ async function removeService(cmd, fullMsg, worker) {
     return await KUBERNETES.api.v1.namespaces('nodeservers').services(worker).delete()
   } catch (err) {
     LOGGER.error(`removeService: ${err.stack}`, fullMsg.userId)
+  }
+}
+
+async function removeIngress(cmd, fullMsg, worker) {
+  try {
+    const nsIngress = await KUBERNETES.apis.extensions.v1beta1.namespaces('nodeservers').ingresses('ns-ingress').get()
+    const nsIndex = nsIngress.body.spec.rules[0].http.paths.findIndex(x => x.path.includes(worker))
+    if (nsIndex > -1) {
+      const headers = { 'content-type': 'application/json-patch+json' }
+      const patchRemove = await KUBERNETES.apis.extensions.v1beta1.namespaces('nodeservers').ingresses('ns-ingress').patch(
+        {
+          headers: headers,
+          body: [{
+            op: 'remove',
+            path: `/spec/rules/0/http/paths/${nsIndex}`
+          }]
+        })
+      if (patchRemove.statusCode !== 200) {
+        LOGGER.error(`removeIngress: failed to remove ${worker} :: ${JSON.stringify(patchRemove)}`, fullMsg.userId)
+      }
+    }
+  } catch (err) {
+    LOGGER.error(`removeIngress: ${err.stack}`, fullMsg.userId)
   }
 }
 
@@ -301,7 +346,7 @@ async function createNS(cmd, fullMsg, worker) {
       ":isyPassword": data.isyPassword,
       ":isConnected": false,
       ":worker": worker.deployment.metadata.name,
-      ":netInfo": {publicIp: PARAMS.NS_PUBLIC_IP, publicPort: worker.nodePort},
+      ":netInfo": {publicIp: PARAMS.NS_PUBLIC_IP, publicPort: worker.nodePort, httpsIngress: `${PARAMS.HTTPSINGRESS}/ns/${worker.deployment.metadata.name}`},
       ":url": data.url,
       ":lang": data.language,
       ":version": data.version,
