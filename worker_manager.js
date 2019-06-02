@@ -169,6 +169,7 @@ async function createService(cmd, fullMsg) {
       }
     }
     if (data.httpsIngress) {
+      LOGGER.debug(`createService: httpsIngress requested`, fullMsg.userId)
       const headers = {'content-type': 'application/json-patch+json'}
       const patchManifest = [{
         op: 'add',
@@ -346,7 +347,7 @@ async function createNS(cmd, fullMsg, worker) {
       ":isyPassword": data.isyPassword,
       ":isConnected": false,
       ":worker": worker.deployment.metadata.name,
-      ":netInfo": {publicIp: PARAMS.NS_PUBLIC_IP, publicPort: worker.nodePort, httpsIngress: `${PARAMS.HTTPSINGRESS}/ns/${worker.deployment.metadata.name}`},
+      ":netInfo": {publicIp: PARAMS.NS_PUBLIC_IP, publicPort: worker.nodePort, httpsIngress: worker.httpsIngress ? `${PARAMS.HTTPSINGRESS}/ns/${worker.deployment.metadata.name}` : false},
       ":url": data.url,
       ":lang": data.language,
       ":version": data.version,
@@ -453,6 +454,9 @@ async function resultRemoveNodeServer(cmd, fullMsg) {
         await removeDeployment(cmd, fullMsg, nodeServer.worker)
         if (nodeServer.netInfo.publicPort !== 0) {
           await removeService(cmd, fullMsg, nodeServer.worker)
+        }
+        if (nodeServer.netInfo.httpsIngress) {
+          await removeIngress(cmd, fullMsg, nodeServer.worker)
         }
       }
       LOGGER.info(`resultRemoveNodeServer: Removed ${nodeServer.name}(${nodeServer.worker}) successfully.`, fullMsg.userId)
