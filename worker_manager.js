@@ -824,7 +824,7 @@ async function main() {
   startHealthCheck()
   // fromKubeconfig(null, 'pgc.nonprod.isy.io')
   // getInCluster()
-  const backend = new Request(Request.config.fromKubeconfig(null, 'pgc.nonprod.isy.io'))
+  const backend = new Request(Request.config.getInCluster())
   KUBERNETES = new Client({ backend })
   await KUBERNETES.loadSpec()
   try {
