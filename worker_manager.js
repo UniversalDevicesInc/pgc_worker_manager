@@ -16,13 +16,14 @@ const SQS = new AWS.SQS()
 const DYNAMO = new AWS.DynamoDB.DocumentClient()
 
 let PARAMS = {}
+let LOGSTREAMS = {}
 let IOT
 
 console.log(`Worker Manager Version: ${VERSION} :: Stage: ${STAGE}`)
 console.log(`ENV: ${JSON.stringify(process.env)}`)
 
 async function configAWS() {
-  IOT = new AWS.IotData({endpoint: `${PARAMS.IOT_ENDPOINT_HOST}`})
+  IOT = new AWS.IotData({endpoint: `${PARAMS.IOT_ENDPOINT_HOST}`, correctClockSkew: true})
 }
 
 // Logger intercept for easy logging in the future.
@@ -139,7 +140,7 @@ async function createService(cmd, fullMsg) {
         kind: 'Service',
         apiVersion: 'v1',
         metadata: {
-            name: name,
+            name: `${name}-in`,
             namespace: 'nodeservers',
             labels: {
               user: `${fullMsg.userId}`,
@@ -155,7 +156,7 @@ async function createService(cmd, fullMsg) {
             ports: [
                 {
                     port: 3000,
-                    name: 'ingress'
+                    name: 'tcpingress'
                 }
             ]
         }
@@ -165,29 +166,68 @@ async function createService(cmd, fullMsg) {
         LOGGER.error(`createService: Failed to create NodePort Service: ${JSON.stringify(nodeport)}`, fullMsg.userId)
       } else {
         nodePort = nodeport.body.spec.ports[0].nodePort
-        LOGGER.debug(`createService: NodePort Service created: ${nodePort}`)
+        LOGGER.debug(`createService: NodePort Service created: ${nodePort}`, fullMsg.userId)
       }
     }
     if (data.httpsIngress) {
-      LOGGER.debug(`createService: httpsIngress requested`, fullMsg.userId)
-      const headers = {'content-type': 'application/json-patch+json'}
-      const patchManifest = [{
-        op: 'add',
-        path: '/spec/rules/0/http/paths/-',
-        value: {
-          backend: {
-            serviceName: name,
-            servicePort: 3000
-          },
-          path: `/ns/${name}`
+      LOGGER.debug(`createService: httpsIngress set creating Service`, fullMsg.userId)
+      const serviceManifest = {
+        kind: 'Service',
+        apiVersion: 'v1',
+        metadata: {
+            name: name,
+            namespace: 'nodeservers',
+            labels: {
+              user: `${fullMsg.userId}`,
+              isy: `${fullMsg[cmd].id.replace(/:/g, '')}`,
+              profileNum: `${fullMsg[cmd].profileNum}`
+            }
+        },
+        spec: {
+            type: 'NodePort',
+            selector: {
+                nodeserver: name
+            },
+            ports: [
+                {
+                    port: 443,
+                    targetPort: 3000,
+                    name: 'httpsingress'
+                }
+            ]
         }
-      }]
-      const patchIngress = await KUBERNETES.apis.extensions.v1beta1.namespaces('nodeservers').ingresses('ns-ingress').patch({ headers: headers, body: patchManifest})
-      if (patchIngress.statusCode != 200) {
-        LOGGER.error(`createService: Failed to create Ingress: ${JSON.stringify(patchIngress)}`, fullMsg.userId)
+      }
+      let inPort = 0
+      const nodeportin = await KUBERNETES.api.v1.namespaces('nodeservers').services.post({ body: serviceManifest })
+      if (nodeportin.statusCode != 201) {
+        LOGGER.error(`createService: Failed to create Ingress NodePort Service: ${JSON.stringify(nodeportin)}`, fullMsg.userId)
       } else {
-        httpsIngress = true
-        LOGGER.debug(`createService: HTTPS Ingress created: ${name}`)
+        inPort = nodeportin.body.spec.ports[0].nodePort
+        LOGGER.debug(`createService: Ingress NodePort Service created: ${inPort}`, fullMsg.userId)
+      }
+      if (inPort !== 0) {
+        LOGGER.debug(`createService: httpsIngress requested creating Ingress`, fullMsg.userId)
+        const headers = {'content-type': 'application/json-patch+json'}
+        const patchManifest = [{
+          op: 'add',
+          path: '/spec/rules/0/http/paths/-',
+          value: {
+            backend: {
+              serviceName: name,
+              servicePort: 443
+            },
+            path: `/ns/${name}/*`
+          }
+        }]
+        const patchIngress = await KUBERNETES.apis.extensions.v1beta1.namespaces('nodeservers').ingresses('ns-ingress').patch({ headers: headers, body: patchManifest})
+        if (patchIngress.statusCode != 200) {
+          LOGGER.error(`createService: Failed to create Ingress: ${JSON.stringify(patchIngress)}`, fullMsg.userId)
+        } else {
+          httpsIngress = true
+          LOGGER.debug(`createService: HTTPS Ingress created: ${name}`, fullMsg.userId)
+        }
+      } else {
+        LOGGER.error(`createService: Failed to create Ingress NodePort skipping Ingress.`, fullMsg.userId)
       }
     }
     return {deployment: deployment.body, nodePort: nodePort, pgUrl: PGURL, httpsIngress}
@@ -347,7 +387,7 @@ async function createNS(cmd, fullMsg, worker) {
       ":isyPassword": data.isyPassword,
       ":isConnected": false,
       ":worker": worker.deployment.metadata.name,
-      ":netInfo": {publicIp: PARAMS.NS_PUBLIC_IP, publicPort: worker.nodePort, httpsIngress: worker.httpsIngress ? `${PARAMS.HTTPSINGRESS}/ns/${worker.deployment.metadata.name}` : false},
+      ":netInfo": {publicIp: PARAMS.NS_PUBLIC_IP, publicPort: worker.nodePort, httpsIngress: worker.httpsIngress ? `${PARAMS.HTTPSINGRESS}/ns/${worker.deployment.metadata.name}/` : false},
       ":url": data.url,
       ":lang": data.language,
       ":version": data.version,
@@ -453,9 +493,10 @@ async function resultRemoveNodeServer(cmd, fullMsg) {
         await timeout(2000)
         await removeDeployment(cmd, fullMsg, nodeServer.worker)
         if (nodeServer.netInfo.publicPort !== 0) {
-          await removeService(cmd, fullMsg, nodeServer.worker)
+          await removeService(cmd, fullMsg, `${nodeServer.worker}-in`)
         }
         if (nodeServer.netInfo.httpsIngress) {
+          await removeService(cmd, fullMsg, nodeServer.worker)
           await removeIngress(cmd, fullMsg, nodeServer.worker)
         }
       }
@@ -518,6 +559,43 @@ async function stopNodeServer(cmd, fullMsg) {
   }
 }
 
+async function startLogStream(cmd, fullMsg) {
+  const deployment = fullMsg[cmd].ns
+  const logTopic = fullMsg.topic
+  if (!LOGSTREAMS.hasOwnProperty(deployment)) {
+    let podSpec = await KUBERNETES.api.v1.namespace('nodeservers').pods.get({
+      qs: {
+        labelSelector: `nodeserver=${deployment}`
+      }
+    })
+    if (podSpec && (podSpec.body.items.length > 0)) {
+      let pod = podSpec.body.items[0].metadata.name
+      LOGGER.debug(pod, fullMsg.userId)
+      LOGSTREAMS[deployment] = await KUBERNETES.api.v1.namespace('nodeservers').pods(pod).log.getStream({
+        qs: {
+          follow: true,
+          tailLines: 500,
+          //previous: true
+        }
+      })
+      LOGSTREAMS[deployment].on('data', async (data) => {
+        let msg = {log: data.toString('utf8').replace(/\n/g, '')}
+        await mqttSend(logTopic, msg, fullMsg)
+      })
+    }
+  } else {
+    LOGGER.error(`startLogStream: log already streaming`, fullMsg.userId)
+  }
+}
+
+async function stopLogStream(cmd, fullMsg) {
+  const deployment = fullMsg[cmd].ns
+  if (LOGSTREAMS.hasOwnProperty(deployment)) {
+    LOGSTREAMS[deployment].abort()
+    delete LOGSTREAMS[deployment]
+  }
+}
+
 // MQTT Methods
 async function mqttSend(topic, message, fullMsg = {}, qos = 0) {
   if (fullMsg.userId) {
@@ -561,6 +639,16 @@ const apiSwitch = {
   test: {
     props: [],
     func: createService,
+    type: null
+  },
+  startLogStream: {
+    props: ['ns'],
+    func: startLogStream,
+    type: null
+  },
+  stopLogStream: {
+    props: ['ns'],
+    func: stopLogStream,
     type: null
   }
 }
@@ -734,7 +822,9 @@ async function main() {
   LOGGER.info(`Retrieved Parameters from AWS Parameter Store for Stage: ${STAGE}`)
   await configAWS()
   startHealthCheck()
-  const backend = new Request(Request.config.getInCluster()) //getInCluster()
+  // fromKubeconfig(null, 'pgc.nonprod.isy.io')
+  // getInCluster()
+  const backend = new Request(Request.config.fromKubeconfig(null, 'pgc.nonprod.isy.io'))
   KUBERNETES = new Client({ backend })
   await KUBERNETES.loadSpec()
   try {
