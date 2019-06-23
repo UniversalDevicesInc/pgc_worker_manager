@@ -3,6 +3,8 @@
 const PACKAGE = require('./package.json')
 const VERSION = PACKAGE.version
 
+const PAKO = require('pako')
+
 const STAGE = process.env.STAGE || 'test'
 const DYNAMO_NS = `pg_${STAGE}-nsTable`
 // Configure Kubernetes-Client with inCluster service account credentials
@@ -570,11 +572,20 @@ async function startLogStream(cmd, fullMsg) {
     })
     if (podSpec && (podSpec.body.items.length > 0)) {
       let pod = podSpec.body.items[0].metadata.name
-      LOGGER.debug(pod, fullMsg.userId)
+      let logData = await KUBERNETES.api.v1.namespace('nodeservers').pods(pod).log.get()
+      if (logData && logData.body) {
+        let binaryString = PAKO.deflate(logData.body, {to: 'string', level: 9})
+        let iotMessage = {
+          topic: `${logTopic}/file`,
+          payload: JSON.stringify({ file: true, log: binaryString }),
+          qos: 0
+        }
+        await IOT.publish(iotMessage).promise()
+      }
       LOGSTREAMS[deployment] = await KUBERNETES.api.v1.namespace('nodeservers').pods(pod).log.getStream({
         qs: {
           follow: true,
-          tailLines: 500,
+          tailLines: 0,
           //previous: true
         }
       })
@@ -824,7 +835,7 @@ async function main() {
   startHealthCheck()
   // fromKubeconfig(null, 'pgc.nonprod.isy.io')
   // getInCluster()
-  const backend = new Request(Request.config.getInCluster())
+  const backend = new Request(process.env.LOCAL ? Request.config.fromKubeconfig(null, 'pgc.nonprod.isy.io') : Request.config.getInCluster())
   KUBERNETES = new Client({ backend })
   await KUBERNETES.loadSpec()
   try {
