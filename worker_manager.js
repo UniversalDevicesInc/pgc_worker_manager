@@ -574,13 +574,24 @@ async function startLogStream(cmd, fullMsg) {
       let pod = podSpec.body.items[0].metadata.name
       let logData = await KUBERNETES.api.v1.namespace('nodeservers').pods(pod).log.get()
       if (logData && logData.body) {
-        let binaryString = PAKO.deflate(logData.body, {to: 'string', level: 9})
-        let iotMessage = {
-          topic: `${logTopic}/file`,
-          payload: JSON.stringify({ file: true, log: binaryString }),
-          qos: 0
+        let logParts = logData.body.match(/(?=[\s\S])(?:.*(\n|\r)?){1,5000}/g).filter(Boolean)
+        // LOGGER.debug(`startLogStream: ${logParts.length}`, fullMsg.userId)
+        let i = 0
+        for (let part of logParts) {
+          i++
+          let binaryString = PAKO.deflate(part, {to: 'string', level: 9})
+          LOGGER.debug(`startLogStream: Compressed Log Part ${i} of ${logParts.length} Size: ${Buffer.byteLength(binaryString) / 1024}kb`, fullMsg.userId)
+          let iotMessage = {
+            topic: `${logTopic}/file`,
+            payload: JSON.stringify({
+              file: true,
+              log: binaryString,
+              end: i === logParts.length ? true : false
+            }),
+            qos: 0
+          }
+          await IOT.publish(iotMessage).promise()
         }
-        await IOT.publish(iotMessage).promise()
       }
       LOGSTREAMS[deployment] = await KUBERNETES.api.v1.namespace('nodeservers').pods(pod).log.getStream({
         qs: {
