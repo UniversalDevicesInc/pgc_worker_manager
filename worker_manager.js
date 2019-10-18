@@ -483,7 +483,7 @@ async function removeNodeServer(cmd, fullMsg) {
 }
 
 async function resultRemoveNodeServer(cmd, fullMsg) {
-  if (fullMsg.result.success) {
+  if (fullMsg.result.success || fullMsg.result.statusCode === 401) {
     let nodeServer = await deleteDbNodeServer(cmd, fullMsg)
     if (nodeServer) {
       if (nodeServer.worker) {
