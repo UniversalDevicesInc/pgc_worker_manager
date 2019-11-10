@@ -483,7 +483,7 @@ async function removeNodeServer(cmd, fullMsg) {
 }
 
 async function resultRemoveNodeServer(cmd, fullMsg) {
-  if (fullMsg.result.success || fullMsg.result.statusCode === 401) {
+  if (fullMsg.result.success || fullMsg.result.statusCode === 404) {
     let nodeServer = await deleteDbNodeServer(cmd, fullMsg)
     if (nodeServer) {
       if (nodeServer.worker) {
@@ -574,7 +574,7 @@ async function startLogStream(cmd, fullMsg) {
       let pod = podSpec.body.items[0].metadata.name
       let logData = await KUBERNETES.api.v1.namespace('nodeservers').pods(pod).log.get({
         qs: {
-          tailLines: 5000
+          tailLines: 2500
         }
       })
       if (logData && logData.body) {
