@@ -516,7 +516,7 @@ async function startNodeServer(cmd, fullMsg) {
       if (nodeServer.isConnected) {
         return LOGGER.error(`${nodeServer.name} is already connected. Not sending start command.`, fullMsg.userId)
       }
-      const getDeployment = await KUBERNETES.apis.apps.v1beta1.namespaces('nodeservers').deployments(nodeServer.worker).get()
+      const getDeployment = await KUBERNETES.apis.apps.v1.namespaces('nodeservers').deployments(nodeServer.worker).get()
       if (getDeployment.statusCode !== 200) {
         return LOGGER.error(`${nodeServer.name} couldn't get status of deployment.`, fullMsg.userId)
       }
@@ -539,7 +539,7 @@ async function stopNodeServer(cmd, fullMsg) {
   try {
     let nodeServer = data.ns
     if (nodeServer && nodeServer.type && nodeServer.type === 'cloud') {
-      const getDeployment = await KUBERNETES.apis.apps.v1beta1.namespaces('nodeservers').deployments(nodeServer.worker).get()
+      const getDeployment = await KUBERNETES.apis.apps.v1.namespaces('nodeservers').deployments(nodeServer.worker).get()
       if (getDeployment.statusCode !== 200) {
         return LOGGER.error(`${nodeServer.name} couldn't get status of deployment.`, fullMsg.userId)
       }
@@ -548,7 +548,7 @@ async function stopNodeServer(cmd, fullMsg) {
       }
       let payload = {stop: ''}
       await mqttSend(`${STAGE}/ns/${nodeServer.worker}`, payload)
-      LOGGER.info(`${cmd} sent successfully. Delaying 2 seconds before shutdown for NodeServer self cleanup.`), fullMsg.userId
+      LOGGER.info(`${cmd} sent successfully. Delaying 2 seconds before shutdown for NodeServer self cleanup.`, fullMsg.userId)
       await timeout(2000)
       let updateManifest = { spec: { replicas: 0 }}
       await KUBERNETES.apis.apps.v1.namespaces('nodeservers').deployments(nodeServer.worker).patch({ body: updateManifest })
