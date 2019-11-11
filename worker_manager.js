@@ -218,7 +218,7 @@ async function createService(cmd, fullMsg) {
               serviceName: name,
               servicePort: 443
             },
-            path: `/ns/${name}/*`
+            path: `/ns/${name}/`
           }
         }]
         const patchIngress = await KUBERNETES.apis.extensions.v1beta1.namespaces('nodeservers').ingresses('ns-ingress').patch({ headers: headers, body: patchManifest})
