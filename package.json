@@ -1,6 +1,6 @@
 {
   "name": "pgc_worker_manager",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Polyglot v2 Swarm Worker Manager",
   "main": "worker_manager.js",
   "scripts": {
